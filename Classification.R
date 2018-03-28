@@ -6,6 +6,9 @@ library("rlang")
 library("rpart")
 library("rpart.plot")
 library("randomForest")
+library("RColorBrewer")
+library("lubridate")
+
 
 ps_data<-read.csv("PoolStudy_Summary.csv")
 #Filter data to remove null values
@@ -20,6 +23,7 @@ ps_data$DOCode[ps_data$Min_DO>=6]<-1
 ps_data$DOLevelMin<-factor(ps_data$DOLevelMin, levels = c("Bad", "Good"))
 ps_data$PoolStudyDate<-as.Date(ps_data$PoolStudyDate)
 ps_data$DaysSinceStart<-ps_data$PoolStudyDate-min(ps_data$PoolStudyDate)
+ps_data$JulianDate <- yday(ps_data$PoolStudyDate)
 #Makes sure that R knows that Sample Number is a category
 ps_data$SampleNumber<-factor(ps_data$SampleNumber)
 #add ordering to DOLevel
@@ -31,26 +35,62 @@ ps_data_CART<-ps_data_CART[order(ps_data_CART$DOLevelMin),]
 
 
 #Create classification tree model
-m1.Binary.DO_RCT_SN_SITE<-rpart(DOLevelMin ~ RiffleCrestThalweg  + DaysSinceStart + ReachType, method = "class", data = ps_data_CART, minbucket = 4)
+m1.Binary.DO_RCT_JD_RT_VO<-rpart(DOLevelMin ~ RiffleCrestThalweg  + JulianDate + ReachType + Volume, method = "class", data = ps_data_CART, minbucket = 4)
 
 #Graph
-prp(m1.Binary.DO_RCT_SN_SITE, 
+prp(m1.Binary.DO_RCT_JD_RT_VO, 
     #Shows bins on both sides of Split
-    type = 4, 
+    type = 2, 
     #Shows number of samples of each category within each grouping
-    extra = 101, 
+    extra = 2, 
+    
     #prevents the categories from extending to the bottom
-    fallen.leaves = F, 
+    fallen.leaves = T, 
+    varlen = 0,
+    #faclen = 0,
     #Makes text larger 
-    cex = .5,  
+    cex = 1,  
+    left = FALSE,
     #Set colors for each category
-    box.palette = list("red", "light green"), 
+    box.palette = "RdGn",
+    #box.palette = list("red", "light green"), 
     #Makes legend bigger
-    legend.cex = 1.5)
+    legend.cex = 1,
+    space = 0.5,
+    round = 0,
+    split.space = .0,
+    split.yspace = 0)
+
+m2.Binary.DO_RCT_JD_RT<-rpart(DOLevelMin ~ RiffleCrestThalweg  + JulianDate + ReachType +Tributary, method = "class", data = ps_data_CART, minbucket = 4)
+
+#Graph
+prp(m2.Binary.DO_RCT_JD_RT, 
+    #Shows bins on both sides of Split
+    type = 2, 
+    #Shows number of samples of each category within each grouping
+    extra = 2, 
+    
+    #prevents the categories from extending to the bottom
+    fallen.leaves = T, 
+    varlen = 0,
+    #faclen = 0,
+    #Makes text larger 
+    cex = 1,  
+    left = FALSE,
+    #Set colors for each category
+    box.palette = "RdGn",
+    #box.palette = list("red", "light green"), 
+    #Makes legend bigger
+    legend.cex = 1,
+    space = 0.5,
+    round = 0,
+    split.space = .0,
+    split.yspace = 0)
+
 
 #Create random forest model
 
-rf_m1<-randomForest(DOLevelMin ~ RiffleCrestThalweg  + DaysSinceStart + ReachType + Volume + Site + MaxDepth + WaterTemp, data = ps_data_CART, ntree = 5000, importance=TRUE)
+rf_m1<-randomForest(DOLevelMin ~ RiffleCrestThalweg  + JulianDate + ReachType + Volume + Site + Tributary + MaxDepth + WaterTemp, data = ps_data_CART, ntree = 5000, importance=TRUE)
 varImpPlot(rf_m1)
 
 #Logistic Regression
