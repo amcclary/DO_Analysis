@@ -1,6 +1,7 @@
 library(mctest)
 library(ppcor)
 library(FactoMineR)
+library(factoextra)
 
 ps <- read.csv('PoolStudy_Summary_clean.csv')
 
@@ -34,6 +35,7 @@ ps.red <- ps.red[,!names(ps.red)%in%var.rm]
 # add DO threshold variable
 ps.red$DOCode[ps.red$Min_DO<6]<-0
 ps.red$DOCode[ps.red$Min_DO>=6]<-1
+ps.red$DOCode <- as.factor(ps.red$DOCode)
 
 # remove response variable(s) for PCA et al since goal is to reduce number of
 # expanatory/predictor variables
@@ -47,16 +49,33 @@ ps.quali <- ps.pred[, sapply(ps.pred, is.factor)]
 
 #### Collinearity Analysis ####
 
-### Run factor analysis predictor variables
+# Run factor analysis predictor variables
 ps.pca <- PCA(ps.quant, graph=F)
 ps.mca <- MCA(ps.quali, graph=F)
 
-# Test for collinearity
+# generate plots
+if(F){
+  fviz_pca_var(ps.pca, col.var="contrib", repel=T, title='PCA Results', 
+               xlab='Component 1', ylab='Component 2',
+               geom='text')+
+    scale_color_gradient2(low="yellow", mid="orange",
+                          high="red", name='Contributions') +
+    theme_minimal()
+  
+  fviz_mca_var(ps.mca, repel=T, title='', cex.lab=1.5, cex=3,
+               xlab='Component 1',
+               ylab='Component 2',
+               geom.var="text", choice='mca.cor')+
+    scale_color_gradient2(low="yellow", mid="orange",
+                          high="red", name='Contributions') +
+    theme_minimal()
+}
+
 # partial correlation with pearson's r
 ps.pcor <- pcor(ps.quant)
 write.csv(ps.pcor$estimate, 'pcor_pearson.csv')
 write.csv(ps.pcor$p.value, 'pcor_pvalue.csv')
-ps.omc <- omcdiag(x=ps.quant, y=ps.red$Min_DO) #overall
+
 
 ps.vif <- rep(NA,ncol(ps.pred)) # VIF within group
 ps.aic <- rep(NA,ncol(ps.pred)) # AIC of [mixed] logistic regression on single predictor
@@ -85,6 +104,8 @@ ps.cor[match(names(ps.quant),names(ps.pred)),] <- cbind(apply(ps.quant, 2,
                                                               method='kendall'))
 # TODO: change hard-coded groups when new data come in
 # Perform test of collinearity with VIF or variane inflation factor
+
+ps.omc <- omcdiag(x=ps.quant, y=ps.red$Min_DO) #overall
 # group 1: Volume, UnitLength, AvgWidth, AvgDepth
 # PoolArea, PoolTailCrest, MaxDepth
 ps.imc <- as.data.frame(imcdiag(x=ps.quant[,c(2:6,9,12)], y=ps.red$Min_DO)$idiags)
@@ -137,5 +158,50 @@ collinear_out <- data.frame(Predictor=names(ps.pred), VIF=ps.vif, AIC=ps.aic,
                             Accuracy=ps.acc, pval=ps.pval, Pearson=ps.cor[,1],
                             Kendall=ps.cor[,2], ChiSq=ps.chi)
 write.csv(collinear_out,'collinear.csv', row.names=F, na='-')
+
+#### Stepwise Regression to investigate in-group collinearities ####
+
+ps.aic.step <- rep(NA,ncol(ps.pred)) # AIC of [mixed] logistic regression on single predictor
+ps.pval.step <- rep(NA,ncol(ps.pred)) # pvalue of logistic regression
+ps.acc.step <- rep(NA,ncol(ps.pred)) # accuracy measure using 0.5 as threshold
+# group 1
+for(i in names(ps.pred)[c(3,5,8,9,12,16)]){
+  str <- paste('x <- glmer(DOCode~(1|ReachType)+RiffleCrestThalweg+Discharge_cfs+'
+               ,i,',data=ps.red,family=binomial)',sep='')
+  eval(parse(text=str))
+  ind <- match(i,names(ps.pred))
+  print(row.names(summary(x)$coefficients)[4])
+  ps.pval.step[ind] <- summary(x)$coefficients[4,4]
+  ps.aic.step[ind] <- AIC(x)
+  ps.acc.step[ind] <- ifelse(predict(x,type='response')>0.5,1,0) %>%
+    "=="(ps.red$DOCode) %>% mean
+}
+# group 2
+for(i in names(ps.pred)[c(10,14)]){
+  str <- paste('x <- glmer(DOCode~(1|ReachType)+MaxDepth+Discharge_cfs+'
+               ,i,',data=ps.red,family=binomial)',sep='')
+  eval(parse(text=str))
+  ind <- match(i,names(ps.pred))
+  print(row.names(summary(x)$coefficients)[4])
+  ps.aic.step[ind] <- AIC(x)
+  ps.pval.step[ind] <- summary(x)$coefficients[4,4]
+  ps.acc.step[ind] <- ifelse(predict(x,type='response')>0.5,1,0) %>%
+    "=="(ps.red$DOCode) %>% mean
+}
+# group 4
+for(i in names(ps.pred)[c(1,6,7,20)]){
+  str <- paste('x <- glmer(DOCode~RiffleCrestThalweg+MaxDepth+Discharge_cfs+(1|'
+               ,i,'),data=ps.red,family=binomial)',sep='')
+  eval(parse(text=str))
+  ind <- match(i,names(ps.pred))
+  print(i)
+  print(ind)
+  ps.aic.step[ind] <- AIC(x)
+  ps.acc.step[ind] <- ifelse(predict(x,type='response')>0.5,1,0) %>%
+    "=="(ps.red$DOCode) %>% mean
+}
+
+stepwise_out <- data.frame(AIC=ps.aic.step,pval=ps.pval.step,Accuracy=ps.acc.step)
+write.csv(stepwise_out, 'stepwise.csv', na='-', row.names=F)
 
 
